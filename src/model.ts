@@ -4,7 +4,10 @@ export type Furniture = Point & { id: string; kind: FurnitureKind; w: number; d:
 export type Wall = { id: string; a: Point; b: Point; thickness: number };
 export type Room = Point & { name: string; area: number; color: string };
 export type Entry = 'left' | 'right' | 'top' | 'bottom';
-export type Plan = { id: string; name: string; width: number; depth: number; wallThickness: number; height: number; entry: Entry; walls: Wall[]; furniture: Furniture[]; rooms: Room[]; exteriorLocked: boolean };
+export type Underlay = { id: string; name: string; src: string; pixelWidth: number; pixelHeight: number; x: number; y: number; width: number; height: number; opacity: number; visible: boolean; calibratedDistance?: number };
+export type Plan = { id: string; name: string; width: number; depth: number; wallThickness: number; height: number; entry: Entry; walls: Wall[]; furniture: Furniture[]; rooms: Room[]; exteriorLocked: boolean; underlay?: Underlay };
+export const MIN_DIMENSION = 2;
+export const MAX_DIMENSION = 60;
 export const uid = () => crypto.randomUUID();
 export const catalog: Record<FurnitureKind, { name: string; w: number; d: number; group: string }> = {
   sofa: { name: '三人沙發', w: 2.6, d: 0.95, group: '客廳' }, chair: { name: '單人椅', w: 0.8, d: 0.8, group: '客廳' }, table: { name: '餐桌', w: 1.65, d: 0.9, group: '餐廳' }, bed: { name: '雙人床', w: 1.8, d: 2.1, group: '臥室' }, kitchen: { name: '廚房檯面', w: 2.8, d: 0.65, group: '廚房' }, plant: { name: '植栽', w: 0.55, d: 0.55, group: '裝飾' }, desk: { name: '工作桌', w: 1.5, d: 0.65, group: '書房' }, toilet: { name: '馬桶', w: 0.65, d: 0.85, group: '衛浴' }, shower: { name: '淋浴間', w: 1.1, d: 1.1, group: '衛浴' }, wardrobe: { name: '收納櫃', w: 2, d: 0.6, group: '臥室' },
@@ -20,6 +23,31 @@ export function constrainFurniture(f: Furniture, plan: Pick<Plan, 'width' | 'dep
   const factor = Math.min(1, (plan.width - 2 * t) / bounds.w, (plan.depth - 2 * t) / bounds.d);
   const b = { w: bounds.w * factor, d: bounds.d * factor };
   return { ...f, w: f.w * factor, d: f.d * factor, x: clamp(f.x, b.w / 2 + t, plan.width - b.w / 2 - t), y: clamp(f.y, b.d / 2 + t, plan.depth - b.d / 2 - t) };
+}
+export function resizePlanDimensions(plan: Plan, width: number, depth: number): Plan {
+  if (plan.exteriorLocked) throw new Error('請先解鎖外牆尺寸');
+  if (![width, depth].every(n => Number.isFinite(n) && n >= MIN_DIMENSION && n <= MAX_DIMENSION)) throw new Error('長寬需介於 2–60 公尺');
+  const sx = width / plan.width, sy = depth / plan.depth;
+  const scale = (p: Point): Point => ({ x: p.x * sx, y: p.y * sy });
+  const next: Plan = { ...plan, width, depth, rooms: [], walls: plan.walls.map(w => ({ ...w, a: scale(w.a), b: scale(w.b) })) };
+  next.furniture = plan.furniture.map(f => constrainFurniture({ ...f, ...scale(f) }, next));
+  // A calibrated drawing is a physical reference: changing the boundary must
+  // not stretch its measured scale. Uncalibrated images may be fitted again.
+  if (plan.underlay) next.underlay = plan.underlay.calibratedDistance ? plan.underlay : fitUnderlay(plan.underlay, next);
+  return next;
+}
+export function fitUnderlay(underlay: Underlay, plan: Pick<Plan, 'width' | 'depth'>): Underlay {
+  const scale = Math.min(plan.width / underlay.pixelWidth, plan.depth / underlay.pixelHeight);
+  const width = underlay.pixelWidth * scale, height = underlay.pixelHeight * scale;
+  return { ...underlay, width, height, x: (plan.width - width) / 2, y: (plan.depth - height) / 2, calibratedDistance: undefined };
+}
+export function calibrateUnderlay(underlay: Underlay, a: Point, b: Point, distance: number): Underlay {
+  const measured = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!Number.isFinite(distance) || distance < .01 || distance > 120 || measured < .01) throw new Error('請選取不同的兩點，並輸入 0.01–120 公尺的已知距離');
+  const factor = distance / measured;
+  const next = { ...underlay, width: underlay.width * factor, height: underlay.height * factor, x: a.x + (underlay.x - a.x) * factor, y: a.y + (underlay.y - a.y) * factor, calibratedDistance: distance };
+  if (next.width > 120 || next.height > 120 || next.width < .02 || next.height < .02 || Math.abs(next.x) > 120 || Math.abs(next.y) > 120) throw new Error('校正後底圖超出範圍，請檢查已知距離與單位');
+  return next;
 }
 export function createPlan(variant = 0, entry: Entry = 'left', width = 12, depth = 9): Plan {
   const transform = (x: number, y: number): Point => {
@@ -78,5 +106,7 @@ export function isPlan(value: unknown): value is Plan {
   const p = value as Plan;
   const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
   const point = (v: Point) => v && finite(v.x) && finite(v.y);
-  return typeof p.id === 'string' && typeof p.name === 'string' && finite(p.width) && p.width >= 6 && p.width <= 30 && finite(p.depth) && p.depth >= 6 && p.depth <= 30 && finite(p.height) && p.height > 0 && finite(p.wallThickness) && p.wallThickness > 0 && ['left', 'right', 'top', 'bottom'].includes(p.entry) && typeof p.exteriorLocked === 'boolean' && Array.isArray(p.walls) && p.walls.length <= 1000 && p.walls.every(w => w && typeof w.id === 'string' && point(w.a) && point(w.b) && finite(w.thickness) && w.thickness > 0) && Array.isArray(p.furniture) && p.furniture.length <= 1000 && p.furniture.every(f => f && typeof f.id === 'string' && Object.hasOwn(catalog, f.kind) && point(f) && finite(f.w) && f.w > 0 && finite(f.d) && f.d > 0 && finite(f.rotation)) && Array.isArray(p.rooms) && p.rooms.length <= 1000 && p.rooms.every(r => r && typeof r.name === 'string' && point(r) && finite(r.area) && typeof r.color === 'string');
+  const u = p.underlay;
+  const validUnderlay = u === undefined || (u && typeof u.id === 'string' && typeof u.name === 'string' && typeof u.src === 'string' && u.src.length <= 2_200_000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u.src) && [u.pixelWidth, u.pixelHeight, u.width, u.height].every(n => finite(n) && n > 0) && u.width <= 120 && u.height <= 120 && point(u) && Math.abs(u.x) <= 120 && Math.abs(u.y) <= 120 && finite(u.opacity) && u.opacity >= 0 && u.opacity <= 1 && typeof u.visible === 'boolean' && (u.calibratedDistance === undefined || (finite(u.calibratedDistance) && u.calibratedDistance >= .01 && u.calibratedDistance <= 120)));
+  return !!validUnderlay && typeof p.id === 'string' && typeof p.name === 'string' && finite(p.width) && p.width >= MIN_DIMENSION && p.width <= MAX_DIMENSION && finite(p.depth) && p.depth >= MIN_DIMENSION && p.depth <= MAX_DIMENSION && finite(p.height) && p.height > 0 && finite(p.wallThickness) && p.wallThickness > 0 && ['left', 'right', 'top', 'bottom'].includes(p.entry) && typeof p.exteriorLocked === 'boolean' && Array.isArray(p.walls) && p.walls.length <= 1000 && p.walls.every(w => w && typeof w.id === 'string' && point(w.a) && point(w.b) && finite(w.thickness) && w.thickness > 0) && Array.isArray(p.furniture) && p.furniture.length <= 1000 && p.furniture.every(f => f && typeof f.id === 'string' && Object.hasOwn(catalog, f.kind) && point(f) && finite(f.w) && f.w > 0 && finite(f.d) && f.d > 0 && finite(f.rotation)) && Array.isArray(p.rooms) && p.rooms.length <= 1000 && p.rooms.every(r => r && typeof r.name === 'string' && point(r) && finite(r.area) && typeof r.color === 'string');
 }

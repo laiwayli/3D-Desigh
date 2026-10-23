@@ -18,6 +18,7 @@ export function PlanDrawing({ plan, display, selected, interactive = false, onFu
       <filter id={`shadow-${plan.id}`} x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx=".04" dy=".09" stdDeviation=".12" floodOpacity=".09"/></filter>
     </defs>
     <rect width={w} height={d} fill={`url(#floor-${plan.id})`} filter={`url(#shadow-${plan.id})`}/>
+    {plan.underlay?.visible && <image data-testid="floorplan-underlay" href={plan.underlay.src} x={plan.underlay.x} y={plan.underlay.y} width={plan.underlay.width} height={plan.underlay.height} opacity={plan.underlay.opacity} preserveAspectRatio="none" pointerEvents="none"/>}
     <g stroke="#565d51" strokeLinecap="square">{[...walls, ...plan.walls].map(wall => <g key={wall.id}>
       <line x1={wall.a.x} y1={wall.a.y} x2={wall.b.x} y2={wall.b.y} strokeWidth={wall.thickness + .035}/>
       <line x1={wall.a.x} y1={wall.a.y} x2={wall.b.x} y2={wall.b.y} stroke={selected === wall.id ? '#829b7d' : display.hatch ? `url(#hatch-${plan.id})` : '#d0d4c8'} strokeWidth={wall.thickness}/>

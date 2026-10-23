@@ -1,5 +1,6 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { floorplanPdf } from './fixtures.mjs';
 import { resolve } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 
@@ -36,9 +37,26 @@ try {
   const backup = await downloaded;
   const data = JSON.parse(await readFile(await backup.path(), 'utf8'));
   assert.equal(data.plan.entry, 'top');
+  await page.getByRole('button', { name: '2D 平面設計' }).click();
+  await page.getByRole('button', { name: '空間', exact: true }).click();
+  await page.getByRole('button', { name: '匯入圖片／PDF 平面圖' }).click();
+  await page.getByLabel('選擇平面圖檔案').setInputFiles({ name: 'offline-plan.pdf', mimeType: 'application/pdf', buffer: floorplanPdf() });
+  await page.getByRole('img', { name: '匯入平面圖預覽' }).waitFor({ timeout: 20000 });
+  await page.getByLabel('PDF 頁面', { exact: true }).selectOption('2');
+  await page.waitForFunction(() => document.querySelector('.pdf-annotations')?.textContent.includes('2500'));
+  await page.getByRole('button', { name: '匯入並校正比例' }).click();
+  const drawing = await page.getByTestId('floorplan-underlay').getAttribute('href');
+  assert(drawing.startsWith('data:image/jpeg;base64,'));
+  const coordinates = await page.getByTestId('plan-canvas').evaluate(svg => [new DOMPoint(2, 2), new DOMPoint(6, 2)].map(p => { const q = p.matrixTransform(svg.getScreenCTM()); return { x: q.x, y: q.y }; }));
+  for (const p of coordinates) await page.mouse.click(p.x, p.y);
+  await page.getByLabel('已知距離', { exact: true }).fill('4000');
+  await page.getByRole('button', { name: '套用標註尺寸' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.underlay?.calibratedDistance === 4);
+  const calibrated = await page.evaluate(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.underlay.calibratedDistance);
+  assert.equal(calibrated, 4);
   assert.equal(network.length, 0, 'Offline HTML must make no network requests');
   assert.deepEqual(errors, []);
-  console.log('PASS: standalone HTML works in an isolated page without external requests; furniture editing, entry generation, WebGL 3D and JSON export work.');
+  console.log('PASS: standalone HTML works in an isolated page without external requests; furniture editing, entry generation, WebGL 3D, JSON export, offline PDF page selection and dimension calibration work.');
 } finally { await browser.close(); }
 
 // Keep a friendly filename for downloading.
