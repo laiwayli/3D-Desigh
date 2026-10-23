@@ -40,6 +40,7 @@ try {
   await page.getByRole('button', { name: '2D 平面設計' }).click();
   await page.getByRole('button', { name: '空間', exact: true }).click();
   await page.getByRole('button', { name: '匯入圖片／PDF 平面圖' }).click();
+  await page.getByRole('button', { name: '僅匯入描圖底圖' }).click();
   await page.getByLabel('選擇平面圖檔案').setInputFiles({ name: 'offline-plan.pdf', mimeType: 'application/pdf', buffer: floorplanPdf() });
   await page.getByRole('img', { name: '匯入平面圖預覽' }).waitFor({ timeout: 20000 });
   await page.getByLabel('PDF 頁面', { exact: true }).selectOption('2');
@@ -54,9 +55,33 @@ try {
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.underlay?.calibratedDistance === 4);
   const calibrated = await page.evaluate(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.underlay.calibratedDistance);
   assert.equal(calibrated, 4);
+  await page.getByRole('button', { name: '載入你提供的三房兩衛範例' }).click();
+  await page.getByTestId('scene-3d').locator('canvas').waitFor();
+  await page.getByRole('button', { name: '選擇室內風格' }).click();
+  assert.equal(await page.locator('.style-choice').count(), 10);
+  await page.getByRole('dialog').getByRole('button', { name: /INDUSTRIAL/ }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.style === 'industrial');
+  const exporting = page.waitForEvent('download');
+  await page.getByRole('button', { name: '匯出 3D PNG' }).click();
+  const pngFile = await exporting, pngData = await readFile(await pngFile.path());
+  assert.equal(pngData.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  const reference = await page.evaluate(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan);
+  assert.equal(reference.reconstruction.method, 'reference'); assert.equal(reference.depth, 10.67); assert(reference.furniture.length > 14);
+  await page.getByRole('button', { name: '2D 平面設計' }).click();
+  await page.getByRole('button', { name: '匯入原圖並重建' }).click();
+  const drawingBase64 = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 600; c.height = 400; const ctx = c.getContext('2d'); ctx.fillStyle = '#ddd'; ctx.fillRect(0, 0, 600, 400); ctx.strokeStyle = '#111'; ctx.lineWidth = 8; ctx.strokeRect(40, 40, 520, 320); ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(300, 360); ctx.moveTo(40, 200); ctx.lineTo(560, 200); ctx.stroke(); return c.toDataURL('image/png').split(',')[1]; });
+  await page.getByLabel('選擇平面圖檔案').setInputFiles({ name: 'offline-rebuild.png', mimeType: 'image/png', buffer: Buffer.from(drawingBase64, 'base64') });
+  await page.getByTestId('crop-preview').waitFor();
+  await page.getByRole('checkbox', { name: /我已依原圖核對/ }).check();
+  await page.getByRole('button', { name: '辨識牆面並配置家具' }).click();
+  await page.getByTestId('reconstruction-preview').waitFor();
+  await page.getByRole('button', { name: '套用重建並開啟 3D' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.reconstruction.method === 'image-lines');
+  const automatic = await page.evaluate(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan);
+  assert(automatic.rooms.length >= 3); assert(automatic.furniture.length > 3);
   assert.equal(network.length, 0, 'Offline HTML must make no network requests');
   assert.deepEqual(errors, []);
-  console.log('PASS: standalone HTML works in an isolated page without external requests; furniture editing, entry generation, WebGL 3D, JSON export, offline PDF page selection and dimension calibration work.');
+  console.log('PASS: standalone HTML works in an isolated page without external requests; furniture editing, entry generation, WebGL 3D, JSON export, offline PDF page selection, dimension calibration, reference reconstruction, 10 style choices, PNG export and automatic image-line reconstruction work.');
 } finally { await browser.close(); }
 
 // Keep a friendly filename for downloading.

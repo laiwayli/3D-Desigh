@@ -1,19 +1,36 @@
+import { interiorStyles } from './interiorStyles';
+import type { StyleId } from './interiorStyles';
 export type Point = { x: number; y: number };
-export type FurnitureKind = 'sofa' | 'chair' | 'table' | 'bed' | 'kitchen' | 'plant' | 'desk' | 'toilet' | 'shower' | 'wardrobe';
+export type FurnitureKind = 'sofa' | 'chair' | 'table' | 'bed' | 'kitchen' | 'plant' | 'desk' | 'toilet' | 'shower' | 'wardrobe' | 'tv';
 export type Furniture = Point & { id: string; kind: FurnitureKind; w: number; d: number; rotation: number };
 export type Wall = { id: string; a: Point; b: Point; thickness: number };
-export type Room = Point & { name: string; area: number; color: string };
+export type RoomKind = 'living' | 'dining' | 'bedroom' | 'master' | 'kitchen' | 'bathroom' | 'study' | 'balcony' | 'hall' | 'service';
+export type Room = Point & { id?: string; name: string; area: number; color: string; kind?: RoomKind; bounds?: { x: number; y: number; w: number; d: number } };
 export type Entry = 'left' | 'right' | 'top' | 'bottom';
 export type Underlay = { id: string; name: string; src: string; pixelWidth: number; pixelHeight: number; x: number; y: number; width: number; height: number; opacity: number; visible: boolean; calibratedDistance?: number };
-export type Plan = { id: string; name: string; width: number; depth: number; wallThickness: number; height: number; entry: Entry; walls: Wall[]; furniture: Furniture[]; rooms: Room[]; exteriorLocked: boolean; underlay?: Underlay };
+export type Reconstruction = { method: 'reference' | 'image-lines'; needsReview: boolean; notes: string[]; dimensions: { label: string; metres: number; status: 'read' | 'estimated' }[] };
+export type Plan = { id: string; name: string; width: number; depth: number; wallThickness: number; height: number; entry: Entry; entryPosition?: number; walls: Wall[]; furniture: Furniture[]; rooms: Room[]; exteriorLocked: boolean; underlay?: Underlay; style?: StyleId; outline?: Point[]; reconstruction?: Reconstruction };
 export const MIN_DIMENSION = 2;
 export const MAX_DIMENSION = 60;
 export const uid = () => crypto.randomUUID();
 export const catalog: Record<FurnitureKind, { name: string; w: number; d: number; group: string }> = {
+  tv: { name: '電視與矮櫃', w: 1.8, d: .38, group: '客廳' },
   sofa: { name: '三人沙發', w: 2.6, d: 0.95, group: '客廳' }, chair: { name: '單人椅', w: 0.8, d: 0.8, group: '客廳' }, table: { name: '餐桌', w: 1.65, d: 0.9, group: '餐廳' }, bed: { name: '雙人床', w: 1.8, d: 2.1, group: '臥室' }, kitchen: { name: '廚房檯面', w: 2.8, d: 0.65, group: '廚房' }, plant: { name: '植栽', w: 0.55, d: 0.55, group: '裝飾' }, desk: { name: '工作桌', w: 1.5, d: 0.65, group: '書房' }, toilet: { name: '馬桶', w: 0.65, d: 0.85, group: '衛浴' }, shower: { name: '淋浴間', w: 1.1, d: 1.1, group: '衛浴' }, wardrobe: { name: '收納櫃', w: 2, d: 0.6, group: '臥室' },
 };
 export const snap = (n: number) => Math.round(n * 10) / 10;
 export const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+export function planArea(plan: Pick<Plan, 'width' | 'depth' | 'outline'>) {
+  if (!plan.outline) return plan.width * plan.depth;
+  return Math.abs(plan.outline.reduce((sum, p, i, points) => { const q = points[(i + 1) % points.length]; return sum + p.x * q.y - q.x * p.y; }, 0)) / 2;
+}
+export function pointInPolygon(p: Point, polygon: Point[]) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i], b = polygon[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
 export function furnitureBounds(f: Furniture) {
   const a = f.rotation * Math.PI / 180;
   return { w: Math.abs(Math.cos(a)) * f.w + Math.abs(Math.sin(a)) * f.d, d: Math.abs(Math.sin(a)) * f.w + Math.abs(Math.cos(a)) * f.d };
@@ -29,7 +46,7 @@ export function resizePlanDimensions(plan: Plan, width: number, depth: number): 
   if (![width, depth].every(n => Number.isFinite(n) && n >= MIN_DIMENSION && n <= MAX_DIMENSION)) throw new Error('長寬需介於 2–60 公尺');
   const sx = width / plan.width, sy = depth / plan.depth;
   const scale = (p: Point): Point => ({ x: p.x * sx, y: p.y * sy });
-  const next: Plan = { ...plan, width, depth, rooms: [], walls: plan.walls.map(w => ({ ...w, a: scale(w.a), b: scale(w.b) })) };
+  const next: Plan = { ...plan, width, depth, rooms: [], outline: plan.outline?.map(scale), reconstruction: plan.reconstruction ? { ...plan.reconstruction, needsReview: true, notes: [...plan.reconstruction.notes, '外牆尺寸已修改，請重新核對原圖標註。'] } : undefined, walls: plan.walls.map(w => ({ ...w, a: scale(w.a), b: scale(w.b) })) };
   next.furniture = plan.furniture.map(f => constrainFurniture({ ...f, ...scale(f) }, next));
   // A calibrated drawing is a physical reference: changing the boundary must
   // not stretch its measured scale. Uncalibrated images may be fitted again.
@@ -83,16 +100,17 @@ export function createPlan(variant = 0, entry: Entry = 'left', width = 12, depth
   return { id: uid(), name: ['日光・雙人寓所', '流動・開放生活', '靜謐・居家辦公'][variant], width, depth, wallThickness: .24, height: 2.8, entry, walls, furniture, rooms, exteriorLocked: true };
 }
 export function entryGeometry(p: Plan) {
-  const pos = .78, span = 1.05;
-  if (p.entry === 'left' || p.entry === 'right') return { a: { x: p.entry === 'left' ? 0 : p.width, y: p.depth * pos - span / 2 }, b: { x: p.entry === 'left' ? 0 : p.width, y: p.depth * pos + span / 2 } };
-  return { a: { x: p.width * (p.entry === 'top' ? pos : 1 - pos) - span / 2, y: p.entry === 'top' ? 0 : p.depth }, b: { x: p.width * (p.entry === 'top' ? pos : 1 - pos) + span / 2, y: p.entry === 'top' ? 0 : p.depth } };
+  const pos = p.entryPosition ?? .78, span = 1.05;
+  if (p.entry === 'left' || p.entry === 'right') { const center = clamp(p.depth * pos, span / 2, p.depth - span / 2); return { a: { x: p.entry === 'left' ? 0 : p.width, y: center - span / 2 }, b: { x: p.entry === 'left' ? 0 : p.width, y: center + span / 2 } }; }
+  const center = clamp(p.width * (p.entry === 'top' ? pos : 1 - pos), span / 2, p.width - span / 2);
+  return { a: { x: center - span / 2, y: p.entry === 'top' ? 0 : p.depth }, b: { x: center + span / 2, y: p.entry === 'top' ? 0 : p.depth } };
 }
 export function exteriorSegments(p: Plan): Wall[] {
-  const { a, b } = entryGeometry(p), points = [{ x: 0, y: 0 }, { x: p.width, y: 0 }, { x: p.width, y: p.depth }, { x: 0, y: p.depth }];
+  const { a, b } = entryGeometry(p), points = p.outline || [{ x: 0, y: 0 }, { x: p.width, y: 0 }, { x: p.width, y: p.depth }, { x: 0, y: p.depth }];
   const result: Wall[] = [];
   points.forEach((point, i) => {
-    const next = points[(i + 1) % 4];
-    const on = point.x === next.x ? point.x === a.x && a.x === b.x : point.y === a.y && a.y === b.y;
+    const next = points[(i + 1) % points.length];
+    const on = point.x === next.x ? point.x === a.x && a.x === b.x && Math.min(point.y, next.y) <= a.y && Math.max(point.y, next.y) >= b.y : point.y === next.y && point.y === a.y && a.y === b.y && Math.min(point.x, next.x) <= a.x && Math.max(point.x, next.x) >= b.x;
     if (!on) result.push({ id: `ext-${i}`, a: point, b: next, thickness: p.wallThickness });
     else {
       const ordered = Math.hypot(point.x - a.x, point.y - a.y) < Math.hypot(point.x - b.x, point.y - b.y) ? [a, b] : [b, a];
@@ -107,6 +125,10 @@ export function isPlan(value: unknown): value is Plan {
   const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
   const point = (v: Point) => v && finite(v.x) && finite(v.y);
   const u = p.underlay;
+  const validExtras = (p.style === undefined || interiorStyles.some(s => s.id === p.style))
+    && (p.entryPosition === undefined || (finite(p.entryPosition) && p.entryPosition >= 0 && p.entryPosition <= 1))
+    && (p.outline === undefined || (Array.isArray(p.outline) && p.outline.length >= 3 && p.outline.length <= 200 && p.outline.every(q => point(q) && q.x >= 0 && q.x <= p.width && q.y >= 0 && q.y <= p.depth)))
+    && (p.reconstruction === undefined || (p.reconstruction && ['reference', 'image-lines'].includes(p.reconstruction.method) && typeof p.reconstruction.needsReview === 'boolean' && Array.isArray(p.reconstruction.notes) && p.reconstruction.notes.length <= 100 && p.reconstruction.notes.every(s => typeof s === 'string') && Array.isArray(p.reconstruction.dimensions) && p.reconstruction.dimensions.every(d => typeof d.label === 'string' && finite(d.metres) && d.metres > 0 && d.metres <= 120 && ['read', 'estimated'].includes(d.status))));
   const validUnderlay = u === undefined || (u && typeof u.id === 'string' && typeof u.name === 'string' && typeof u.src === 'string' && u.src.length <= 2_200_000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u.src) && [u.pixelWidth, u.pixelHeight, u.width, u.height].every(n => finite(n) && n > 0) && u.width <= 120 && u.height <= 120 && point(u) && Math.abs(u.x) <= 120 && Math.abs(u.y) <= 120 && finite(u.opacity) && u.opacity >= 0 && u.opacity <= 1 && typeof u.visible === 'boolean' && (u.calibratedDistance === undefined || (finite(u.calibratedDistance) && u.calibratedDistance >= .01 && u.calibratedDistance <= 120)));
-  return !!validUnderlay && typeof p.id === 'string' && typeof p.name === 'string' && finite(p.width) && p.width >= MIN_DIMENSION && p.width <= MAX_DIMENSION && finite(p.depth) && p.depth >= MIN_DIMENSION && p.depth <= MAX_DIMENSION && finite(p.height) && p.height > 0 && finite(p.wallThickness) && p.wallThickness > 0 && ['left', 'right', 'top', 'bottom'].includes(p.entry) && typeof p.exteriorLocked === 'boolean' && Array.isArray(p.walls) && p.walls.length <= 1000 && p.walls.every(w => w && typeof w.id === 'string' && point(w.a) && point(w.b) && finite(w.thickness) && w.thickness > 0) && Array.isArray(p.furniture) && p.furniture.length <= 1000 && p.furniture.every(f => f && typeof f.id === 'string' && Object.hasOwn(catalog, f.kind) && point(f) && finite(f.w) && f.w > 0 && finite(f.d) && f.d > 0 && finite(f.rotation)) && Array.isArray(p.rooms) && p.rooms.length <= 1000 && p.rooms.every(r => r && typeof r.name === 'string' && point(r) && finite(r.area) && typeof r.color === 'string');
+  return !!validExtras && !!validUnderlay && typeof p.id === 'string' && typeof p.name === 'string' && finite(p.width) && p.width >= MIN_DIMENSION && p.width <= MAX_DIMENSION && finite(p.depth) && p.depth >= MIN_DIMENSION && p.depth <= MAX_DIMENSION && finite(p.height) && p.height > 0 && finite(p.wallThickness) && p.wallThickness > 0 && ['left', 'right', 'top', 'bottom'].includes(p.entry) && typeof p.exteriorLocked === 'boolean' && Array.isArray(p.walls) && p.walls.length <= 1000 && p.walls.every(w => w && typeof w.id === 'string' && point(w.a) && point(w.b) && finite(w.thickness) && w.thickness > 0) && Array.isArray(p.furniture) && p.furniture.length <= 1000 && p.furniture.every(f => f && typeof f.id === 'string' && Object.hasOwn(catalog, f.kind) && point(f) && finite(f.w) && f.w > 0 && finite(f.d) && f.d > 0 && finite(f.rotation)) && Array.isArray(p.rooms) && p.rooms.length <= 1000 && p.rooms.every(r => r && typeof r.name === 'string' && point(r) && finite(r.area) && typeof r.color === 'string' && (r.kind === undefined || ['living', 'dining', 'bedroom', 'master', 'kitchen', 'bathroom', 'study', 'balcony', 'hall', 'service'].includes(r.kind)) && (r.bounds === undefined || (point(r.bounds) && finite(r.bounds.w) && r.bounds.w > 0 && finite(r.bounds.d) && r.bounds.d > 0)));
 }

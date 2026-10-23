@@ -2,28 +2,32 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { exteriorSegments } from './model';
 import type { Plan } from './model';
+import { getInteriorStyle } from './interiorStyles';
 
-const C = { ivory: '#f7f2e9', linen: '#e8dfcf', oak: '#d0b28a', taupe: '#b79b7d', dark: '#4e504a', brass: '#b49b71' };
+
 
 export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boolean, furniture: boolean, labels: boolean) {
+  const style = getInteriorStyle(plan.style);
+  const C = { ivory: style.wall, linen: style.fabric, oak: style.wood, taupe: style.accent, dark: style.metal, brass: style.metal };
+  const recolor: Record<string, string> = { '#eee5d5': style.fabric, '#c7b296': style.accent, '#f9f3e7': style.wall, '#d2c4af': style.fabric, '#faf5ea': style.wall, '#e6dccb': style.fabric, '#f4ecdc': style.wall, '#cbbd9f': style.wood, '#e0d2b9': style.fabric, '#dfd3bf': style.fabric, '#d1c3aa': style.accent, '#c2b399': style.accent, '#c9b596': style.wood, '#b7aa94': style.wood };
   const geometries: THREE.BufferGeometry[] = [], materials: THREE.Material[] = [], textures: THREE.Texture[] = [];
   const materialCache = new Map<string, THREE.MeshStandardMaterial>();
   const grain = document.createElement('canvas'); grain.width = 512; grain.height = 512;
-  const ctx = grain.getContext('2d')!; ctx.fillStyle = '#d3b991'; ctx.fillRect(0, 0, 512, 512);
+  const ctx = grain.getContext('2d')!; ctx.fillStyle = style.wood; ctx.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 230; i++) {
     ctx.strokeStyle = `rgba(109,78,44,${.025 + (i % 7) * .006})`; ctx.lineWidth = i % 8 === 0 ? 2 : .5;
     ctx.beginPath(); ctx.moveTo(0, i * 2.3); for (let x = 0; x <= 512; x += 16) ctx.lineTo(x, i * 2.3 + Math.sin(x / 100 + i * 1.7) * 4); ctx.stroke();
   }
   const wood = new THREE.CanvasTexture(grain); wood.colorSpace = THREE.SRGBColorSpace; wood.wrapS = wood.wrapT = THREE.RepeatWrapping; textures.push(wood);
   const mat = (color: string, oak = false) => {
-    const key = color + oak; let m = materialCache.get(key);
+    color = recolor[color] || color; const key = color + oak; let m = materialCache.get(key);
     if (!m) { m = new THREE.MeshStandardMaterial({ color: oak ? '#ffffff' : color, map: oak ? wood : null, roughness: oak ? .78 : .9 }); materials.push(m); materialCache.set(key, m); }
     return m;
   };
   const mesh = (geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D) => {
     geometries.push(geometry); const m = new THREE.Mesh(geometry, material); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
   };
-  const box = (w: number, h: number, d: number, x: number, y: number, z: number, color: string, parent: THREE.Object3D = scene, rounded = false, oak = false) => mesh(rounded ? new RoundedBoxGeometry(w, h, d, 2, Math.min(.06, w / 5, h / 5, d / 5)) : new THREE.BoxGeometry(w, h, d), mat(color, oak), x, y, z, parent);
+  const box = (w: number, h: number, d: number, x: number, y: number, z: number, color: string, parent: THREE.Object3D = scene, rounded = false, oak = false) => mesh(rounded && style.rounded ? new RoundedBoxGeometry(w, h, d, 2, Math.min(.06, w / 5, h / 5, d / 5)) : new THREE.BoxGeometry(w, h, d), mat(color, oak), x, y, z, parent);
   const cylinder = (top: number, bottom: number, h: number, x: number, y: number, z: number, color: string, parent: THREE.Object3D) => mesh(new THREE.CylinderGeometry(top, bottom, h, 20), mat(color), x, y, z, parent);
   const glowMat = new THREE.MeshStandardMaterial({ color: '#ffe5a9', emissive: '#ffc66b', emissiveIntensity: 1.5, roughness: .7 }); materials.push(glowMat);
   const glow = (w: number, x: number, y: number, z: number, parent: THREE.Object3D) => mesh(new THREE.BoxGeometry(w, .018, .025), glowMat, x, y, z, parent);
@@ -37,29 +41,40 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
       leaf.scale.set(size * .12, size * .36, size * .06); leaf.rotation.set(Math.sin(a) * .5, a, Math.cos(a) * .6);
     }
   };
-  const legs = (w: number, d: number, h: number, parent: THREE.Object3D) => { for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(.045, h, .045, sx * (w / 2 - .1), h / 2, sz * (d / 2 - .1), C.oak, parent, false, true); };
+  const legs = (w: number, d: number, h: number, parent: THREE.Object3D) => { const metal = ['industrial', 'minimal', 'luxury'].includes(style.id); for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(.045, h, .045, sx * (w / 2 - .1), h / 2, sz * (d / 2 - .1), metal ? C.dark : C.oak, parent, false, !metal); };
   const size = Math.max(plan.width, plan.depth);
   const groundMaterial = new THREE.ShadowMaterial({ color: '#75654e', opacity: .18 }); materials.push(groundMaterial);
   const ground = mesh(new THREE.PlaneGeometry(size * 4, size * 4), groundMaterial, 0, -.24, 0, scene); ground.rotation.x = -Math.PI / 2; ground.castShadow = false;
-  box(plan.width + .25, .17, plan.depth + .25, 0, -.15, 0, '#c9bca7');
-  const floorWood = wood.clone(); floorWood.repeat.set(plan.width / 2.4, plan.depth / 1.5); textures.push(floorWood);
-  const floorMat = new THREE.MeshStandardMaterial({ color: '#f3e8d5', map: floorWood, roughness: .83 }); materials.push(floorMat);
-  mesh(new THREE.BoxGeometry(plan.width, .05, plan.depth), floorMat, 0, -.035, 0, scene);
-  for (let z = .2; z < plan.depth; z += .22) {
-    box(plan.width, .002, .005, 0, -.006, z - plan.depth / 2, '#c5b494');
-    for (let x = (Math.round(z / .22) % 3) * .75; x < plan.width; x += 2.2) box(.005, .002, .22, x - plan.width / 2, -.005, z - plan.depth / 2 - .11, '#cbb99a');
-  }
+  const floorShape = () => {
+    const points = plan.outline || [{ x: 0, y: 0 }, { x: plan.width, y: 0 }, { x: plan.width, y: plan.depth }, { x: 0, y: plan.depth }];
+    const shape = new THREE.Shape(); points.forEach((p, i) => { const x = p.x - plan.width / 2, y = plan.depth / 2 - p.y; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }); shape.closePath(); return shape;
+  };
+  if (plan.outline) { const base = mesh(new THREE.ExtrudeGeometry(floorShape(), { depth: .17, bevelEnabled: false }), mat(style.accent), 0, -.2, 0, scene); base.rotation.x = -Math.PI / 2; }
+  else box(plan.width + .25, .17, plan.depth + .25, 0, -.15, 0, style.accent);
+  const floorCanvas = document.createElement('canvas'); floorCanvas.width = floorCanvas.height = 512; const fc = floorCanvas.getContext('2d')!;
+  fc.fillStyle = style.floor; fc.fillRect(0, 0, 512, 512);
+  if (style.floorFinish === 'wood') { fc.globalAlpha = .4; fc.drawImage(grain, 0, 0); fc.globalAlpha = 1; for (let y = 0; y < 512; y += 64) { fc.strokeStyle = '#77634533'; fc.lineWidth = 1; fc.beginPath(); fc.moveTo(0, y); fc.lineTo(512, y); const x = (y / 64 % 3) * 170; fc.moveTo(x, y); fc.lineTo(x, y + 64); fc.stroke(); } }
+  else if (style.floorFinish === 'marble') { for (let i = 0; i < 12; i++) { fc.strokeStyle = i % 3 ? '#9b948a24' : '#c1ac8270'; fc.lineWidth = i % 3 ? 1 : 2; fc.beginPath(); for (let y = 0; y <= 512; y += 8) { const x = i * 58 + Math.sin(y / 90 + i) * 45 - y * .25; if (!y) fc.moveTo(x, y); else fc.lineTo(x, y); } fc.stroke(); } }
+  else if (style.floorFinish === 'tile') { for (let y = 0; y < 512; y += 128) for (let x = 0; x < 512; x += 128) { fc.fillStyle = (x + y) / 128 % 2 ? style.floor : '#e5e2ce'; fc.fillRect(x + 2, y + 2, 124, 124); fc.strokeStyle = style.accent; fc.lineWidth = 3; fc.strokeRect(x + 32, y + 32, 64, 64); } }
+  else { for (let i = 0; i < 3000; i++) { fc.fillStyle = `rgba(80,75,65,${(i % 5) * .012})`; fc.fillRect((i * 71) % 512, (i * 131) % 512, 2, 2); } }
+  const floorTexture = new THREE.CanvasTexture(floorCanvas); floorTexture.colorSpace = THREE.SRGBColorSpace; floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+  floorTexture.repeat.set(plan.outline ? .45 : plan.width / 2.4, plan.outline ? .45 : plan.depth / 1.7); textures.push(floorTexture);
+  const floorMat = new THREE.MeshStandardMaterial({ color: '#ffffff', map: floorTexture, roughness: style.floorFinish === 'marble' ? .3 : .83 }); materials.push(floorMat);
+  if (plan.outline) { const floor = mesh(new THREE.ExtrudeGeometry(floorShape(), { depth: .05, bevelEnabled: false }), floorMat, 0, -.05, 0, scene); floor.rotation.x = -Math.PI / 2; }
+  else mesh(new THREE.BoxGeometry(plan.width, .05, plan.depth), floorMat, 0, -.035, 0, scene);
   [...exteriorSegments(plan), ...plan.walls].forEach(w => {
     const exterior = w.id.startsWith('ext-'), h = cutaway ? exterior ? .72 : 1.25 : plan.height, len = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
     const g = new THREE.Group(); g.position.set((w.a.x + w.b.x) / 2 - plan.width / 2, 0, (w.a.y + w.b.y) / 2 - plan.depth / 2); g.rotation.y = -Math.atan2(w.b.y - w.a.y, w.b.x - w.a.x); scene.add(g);
-    box(len, h, w.thickness, 0, h / 2, 0, C.ivory, g); box(len, .025, w.thickness + .008, 0, h + .0125, 0, exterior ? C.dark : '#b7aa94', g);
+    box(len, h, w.thickness, 0, h / 2, 0, C.ivory, g); box(len, .025, w.thickness + .008, 0, h + .0125, 0, exterior ? C.dark : style.wood, g);
     for (const sign of [-1, 1]) box(len, .075, .018, 0, .05, sign * (w.thickness / 2 + .009), '#c9b596', g);
     if (exterior && len > 2.5) glow(len * .7, 0, h - .05, -.5 * w.thickness - .015, g);
   });
   if (furniture) plan.furniture.forEach(f => {
     const g = new THREE.Group(); g.position.set(f.x - plan.width / 2, 0, f.y - plan.depth / 2); g.rotation.y = -f.rotation * Math.PI / 180; scene.add(g);
     const { w, d } = f;
-    if (f.kind === 'sofa') {
+    if (style.lowFurniture && ['sofa', 'bed', 'table', 'chair', 'desk'].includes(f.kind)) g.scale.y = .75;
+    if (f.kind === 'tv') { box(w, .4, d, 0, .2, 0, C.oak, g, true, true); box(w * .78, .72, .055, 0, .86, -d * .16, C.dark, g, true); box(w * .72, .63, .012, 0, .86, -d * .16 + .034, '#262d30', g); glow(w * .7, 0, .045, d / 2 + .02, g); }
+    else if (f.kind === 'sofa') {
       box(w + .45, .018, d + 1.6, 0, .008, d * .6, '#e0d2b9', g, true);
       for (let i = 0; i < 9; i++) box(w + .35, .003, .007, 0, .02, d * .6 - (d + 1.4) / 2 + i * (d + 1.4) / 8, '#d1c3aa', g);
       legs(w, d, .13, g); box(w, .24, d, 0, .23, 0, C.taupe, g, true); box(w, .54, .19, 0, .56, -d / 2 + .095, C.linen, g, true);
@@ -93,7 +108,7 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
   });
   if (labels) plan.rooms.forEach(room => {
     const canvas = document.createElement('canvas'); canvas.width = 64 + room.name.length * 52; canvas.height = 112; const c = canvas.getContext('2d')!;
-    c.fillStyle = '#806d57e8'; c.fillRect(3, 5, canvas.width - 6, 102); c.font = '500 48px "Noto Sans TC", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#fff8e9'; c.fillText(room.name, canvas.width / 2, 56, canvas.width - 30);
+    c.fillStyle = new THREE.Color(style.accent).multiplyScalar(.6).getStyle(); c.fillRect(3, 5, canvas.width - 6, 102); c.font = '500 48px "Noto Sans TC", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#fff8e9'; c.fillText(room.name, canvas.width / 2, 56, canvas.width - 30);
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; textures.push(texture); const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }); materials.push(material); const sprite = new THREE.Sprite(material); sprite.position.set(room.x - plan.width / 2, 1.1, room.y - plan.depth / 2); sprite.scale.set(canvas.width / 112 * .37, .37, 1); sprite.renderOrder = 10; scene.add(sprite);
   });
   return () => { geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); textures.forEach(t => t.dispose()); };

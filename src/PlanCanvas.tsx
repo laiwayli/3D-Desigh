@@ -17,16 +17,16 @@ export function PlanDrawing({ plan, display, selected, interactive = false, onFu
       <pattern id={`floor-${plan.id}`} patternUnits="userSpaceOnUse" width=".48" height=".48"><rect width=".48" height=".48" fill="#fbfaf5"/><path d="M.48 0 H0 V.48" fill="none" stroke="#eae9e0" strokeWidth=".008"/></pattern>
       <filter id={`shadow-${plan.id}`} x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx=".04" dy=".09" stdDeviation=".12" floodOpacity=".09"/></filter>
     </defs>
-    <rect width={w} height={d} fill={`url(#floor-${plan.id})`} filter={`url(#shadow-${plan.id})`}/>
+    <polygon points={(plan.outline || [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }]).map(p => `${p.x},${p.y}`).join(" ")} fill={`url(#floor-${plan.id})`} filter={`url(#shadow-${plan.id})`}/>
     {plan.underlay?.visible && <image data-testid="floorplan-underlay" href={plan.underlay.src} x={plan.underlay.x} y={plan.underlay.y} width={plan.underlay.width} height={plan.underlay.height} opacity={plan.underlay.opacity} preserveAspectRatio="none" pointerEvents="none"/>}
     <g stroke="#565d51" strokeLinecap="square">{[...walls, ...plan.walls].map(wall => <g key={wall.id}>
       <line x1={wall.a.x} y1={wall.a.y} x2={wall.b.x} y2={wall.b.y} strokeWidth={wall.thickness + .035}/>
       <line x1={wall.a.x} y1={wall.a.y} x2={wall.b.x} y2={wall.b.y} stroke={selected === wall.id ? '#829b7d' : display.hatch ? `url(#hatch-${plan.id})` : '#d0d4c8'} strokeWidth={wall.thickness}/>
       {interactive && !wall.id.startsWith('ext-') && <line className="wall-hit" x1={wall.a.x} y1={wall.a.y} x2={wall.b.x} y2={wall.b.y} stroke="transparent" strokeWidth=".26" onPointerDown={e => onWall?.(wall.id, e)}/>}
     </g>)}</g>
-    <g stroke="#97b7b0" strokeWidth=".1" fill="none">
+    {!plan.reconstruction && <g stroke="#97b7b0" strokeWidth=".1" fill="none">
       <path d={`M${w * .12},0 H${w * .4} ${plan.entry !== 'top' ? `M${w * .66},0 H${w * .87}` : ''} M${w},${d * .15} V${d * .35} ${plan.entry !== 'bottom' ? `M${w * .25},${d} H${w * .52}` : ''}`}/>
-    </g>
+    </g>}
     <g fill="none" stroke="#8a9880" strokeWidth=".018">
       {isSide ? <><path d={`M${door.a.x},${door.a.y} h${dx * 1.05}`}/><path d={`M${door.b.x},${door.b.y} A1.05,1.05 0 0 ${dx === 1 ? 0 : 1} ${door.a.x + dx * 1.05},${door.a.y}`} strokeDasharray=".045 .03"/></> : <><path d={`M${door.a.x},${door.a.y} v${dy * 1.05}`}/><path d={`M${door.b.x},${door.b.y} A1.05,1.05 0 0 ${dy === 1 ? 1 : 0} ${door.a.x},${door.a.y + dy * 1.05}`} strokeDasharray=".045 .03"/></>}
     </g>
