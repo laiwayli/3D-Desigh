@@ -2,23 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { autoFurnish, findRooms, furnitureCollides } from './autoFurnish';
 import { interiorStyles } from './interiorStyles';
 import { createReferencePlan } from './referencePlan';
-import { createPlan, isPlan, planArea, pointInPolygon } from './model';
+import { createPlan, isPlan, planArea } from './model';
 import { extractWallLines } from './reconstructImage';
 
 describe('reference plan rebuilt from the supplied drawing', () => {
-  it('uses the transcribed dimensions and preserves a nonrectangular outline', () => {
+  it('uses the transcribed main-body dimensions without inventing a balcony extension', () => {
     const p = createReferencePlan();
     expect(isPlan(p)).toBe(true); expect(p.depth).toBe(10.67);
     expect(p.reconstruction?.dimensions.find(d => d.label.startsWith('主體寬'))?.metres).toBe(7.76);
     expect(p.reconstruction?.needsReview).toBe(true); expect(p.reconstruction?.method).toBe('reference');
-    expect(p.outline!.length).toBeGreaterThan(4); expect(planArea(p)).toBeLessThan(p.width * p.depth);
-    expect(pointInPolygon({ x: .5, y: 5 }, p.outline!)).toBe(false);
+    expect(p.width).toBe(7.76); expect(planArea(p)).toBeLessThan(p.width * p.depth);
+    expect(p.excludedAreas?.some(a => a.kind === 'unknown')).toBe(true);
   });
   it('places real furniture sizes without intersecting walls or other furniture', () => {
     const p = createReferencePlan();
     expect(p.furniture.length).toBeGreaterThan(14);
-    expect(p.furniture.filter(f => f.kind === 'bed')).toHaveLength(2);
-    expect(p.furniture.some(f => f.kind === 'desk')).toBe(true);
+    expect(p.furniture.filter(f => f.kind === 'bed')).toHaveLength(1);
+    expect(p.furniture.filter(f => f.kind === 'bunkBed')).toHaveLength(1);
+    expect(p.furniture.some(f => f.kind === 'doubleDesk')).toBe(true);
     expect(p.furniture.some(f => f.kind === 'tv')).toBe(true);
     p.furniture.forEach((f, i) => expect(furnitureCollides(f, p, p.furniture.slice(0, i)), `${f.kind} at ${f.x}, ${f.y}`).toBe(false));
     const twice = autoFurnish(p).plan;

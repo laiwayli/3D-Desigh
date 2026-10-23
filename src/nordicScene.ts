@@ -47,9 +47,15 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
   const ground = mesh(new THREE.PlaneGeometry(size * 4, size * 4), groundMaterial, 0, -.24, 0, scene); ground.rotation.x = -Math.PI / 2; ground.castShadow = false;
   const floorShape = () => {
     const points = plan.outline || [{ x: 0, y: 0 }, { x: plan.width, y: 0 }, { x: plan.width, y: plan.depth }, { x: 0, y: plan.depth }];
-    const shape = new THREE.Shape(); points.forEach((p, i) => { const x = p.x - plan.width / 2, y = plan.depth / 2 - p.y; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }); shape.closePath(); return shape;
+    const shape = new THREE.Shape(); points.forEach((p, i) => { const x = p.x - plan.width / 2, y = plan.depth / 2 - p.y; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }); shape.closePath();
+    for (const a of plan.excludedAreas || []) {
+      const x = a.x - plan.width / 2, y = plan.depth / 2 - a.y;
+      const hole = new THREE.Path(); hole.moveTo(x, y); hole.lineTo(x, y - a.d); hole.lineTo(x + a.w, y - a.d); hole.lineTo(x + a.w, y); hole.closePath(); shape.holes.push(hole);
+    }
+    return shape;
   };
-  if (plan.outline) { const base = mesh(new THREE.ExtrudeGeometry(floorShape(), { depth: .17, bevelEnabled: false }), mat(style.accent), 0, -.2, 0, scene); base.rotation.x = -Math.PI / 2; }
+  const shapedFloor = !!plan.outline || !!plan.excludedAreas?.length;
+  if (shapedFloor) { const base = mesh(new THREE.ExtrudeGeometry(floorShape(), { depth: .17, bevelEnabled: false }), mat(style.accent), 0, -.2, 0, scene); base.rotation.x = -Math.PI / 2; }
   else box(plan.width + .25, .17, plan.depth + .25, 0, -.15, 0, style.accent);
   const floorCanvas = document.createElement('canvas'); floorCanvas.width = floorCanvas.height = 512; const fc = floorCanvas.getContext('2d')!;
   fc.fillStyle = style.floor; fc.fillRect(0, 0, 512, 512);
@@ -58,9 +64,9 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
   else if (style.floorFinish === 'tile') { for (let y = 0; y < 512; y += 128) for (let x = 0; x < 512; x += 128) { fc.fillStyle = (x + y) / 128 % 2 ? style.floor : '#e5e2ce'; fc.fillRect(x + 2, y + 2, 124, 124); fc.strokeStyle = style.accent; fc.lineWidth = 3; fc.strokeRect(x + 32, y + 32, 64, 64); } }
   else { for (let i = 0; i < 3000; i++) { fc.fillStyle = `rgba(80,75,65,${(i % 5) * .012})`; fc.fillRect((i * 71) % 512, (i * 131) % 512, 2, 2); } }
   const floorTexture = new THREE.CanvasTexture(floorCanvas); floorTexture.colorSpace = THREE.SRGBColorSpace; floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
-  floorTexture.repeat.set(plan.outline ? .45 : plan.width / 2.4, plan.outline ? .45 : plan.depth / 1.7); textures.push(floorTexture);
+  floorTexture.repeat.set(shapedFloor ? .45 : plan.width / 2.4, shapedFloor ? .45 : plan.depth / 1.7); textures.push(floorTexture);
   const floorMat = new THREE.MeshStandardMaterial({ color: '#ffffff', map: floorTexture, roughness: style.floorFinish === 'marble' ? .3 : .83 }); materials.push(floorMat);
-  if (plan.outline) { const floor = mesh(new THREE.ExtrudeGeometry(floorShape(), { depth: .05, bevelEnabled: false }), floorMat, 0, -.05, 0, scene); floor.rotation.x = -Math.PI / 2; }
+  if (shapedFloor) { const floor = mesh(new THREE.ExtrudeGeometry(floorShape(), { depth: .05, bevelEnabled: false }), floorMat, 0, -.05, 0, scene); floor.rotation.x = -Math.PI / 2; }
   else mesh(new THREE.BoxGeometry(plan.width, .05, plan.depth), floorMat, 0, -.035, 0, scene);
   [...exteriorSegments(plan), ...plan.walls].forEach(w => {
     const exterior = w.id.startsWith('ext-'), h = cutaway ? exterior ? .72 : 1.25 : plan.height, len = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y);
@@ -69,10 +75,23 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
     for (const sign of [-1, 1]) box(len, .075, .018, 0, .05, sign * (w.thickness / 2 + .009), '#c9b596', g);
     if (exterior && len > 2.5) glow(len * .7, 0, h - .05, -.5 * w.thickness - .015, g);
   });
+  for (const column of plan.columns || []) {
+    const h = cutaway ? 1.45 : plan.height;
+    const p = box(column.w, h, column.d, column.x - plan.width / 2, h / 2, column.y - plan.depth / 2, C.dark);
+    p.name = column.status === 'estimated' ? '柱位（待核）' : '柱位';
+    box(column.w + .012, .025, column.d + .012, column.x - plan.width / 2, h + .0125, column.y - plan.depth / 2, '#514f48');
+  }
+  for (const area of plan.excludedAreas || []) {
+    const x = area.x - plan.width / 2, z = area.y - plan.depth / 2;
+    const points = [new THREE.Vector3(x, -.1, z), new THREE.Vector3(x + area.w, -.1, z + area.d), new THREE.Vector3(x + area.w, -.1, z), new THREE.Vector3(x, -.1, z + area.d)];
+    const geometry = new THREE.BufferGeometry().setFromPoints(points); geometries.push(geometry);
+    const material = new THREE.LineDashedMaterial({ color: '#a39783', dashSize: .12, gapSize: .08 }); materials.push(material);
+    const cross = new THREE.LineSegments(geometry, material); cross.computeLineDistances(); cross.name = area.name; scene.add(cross);
+  }
   if (furniture) plan.furniture.forEach(f => {
     const g = new THREE.Group(); g.position.set(f.x - plan.width / 2, 0, f.y - plan.depth / 2); g.rotation.y = -f.rotation * Math.PI / 180; scene.add(g);
     const { w, d } = f;
-    if (style.lowFurniture && ['sofa', 'bed', 'table', 'chair', 'desk'].includes(f.kind)) g.scale.y = .75;
+    if (style.lowFurniture && ['sofa', 'bed', 'table', 'chair', 'desk', 'doubleDesk'].includes(f.kind)) g.scale.y = .75;
     if (f.kind === 'tv') { box(w, .4, d, 0, .2, 0, C.oak, g, true, true); box(w * .78, .72, .055, 0, .86, -d * .16, C.dark, g, true); box(w * .72, .63, .012, 0, .86, -d * .16 + .034, '#262d30', g); glow(w * .7, 0, .045, d / 2 + .02, g); }
     else if (f.kind === 'sofa') {
       box(w + .45, .018, d + 1.6, 0, .008, d * .6, '#e0d2b9', g, true);
@@ -87,9 +106,25 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
       box(w + .35, .018, d + .35, 0, .01, .05, '#dfd3bf', g, true); box(w, .28, d, 0, .24, 0, C.oak, g, true, true); box(w - .04, .18, d - .04, 0, .46, 0, C.ivory, g, true); box(w + .04, 1, .12, 0, .5, -d / 2, C.oak, g, true, true); box(w - .03, .12, d * .66, 0, .59, d * .14, '#d2c4af', g, true);
       for (const sign of [-1, 1]) box(w * .38, .15, d * .2, sign * w * .23, .6, -d * .32, '#faf5ea', g, true);
       for (let i = 0; i < 5; i++) box(w - .1, .009, .012, 0, .655, d * .03 + i * d * .09, '#c2b399', g, true);
-    } else if (f.kind === 'table' || f.kind === 'desk') {
+    } else if (f.kind === 'bunkBed') {
+      // Both levels share the same editable floor footprint.
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(.065, 1.98, .065, sx * (w / 2 - .035), .99, sz * (d / 2 - .035), C.oak, g, false, true);
+      for (const h of [.3, 1.43]) {
+        box(w, .12, d, 0, h, 0, C.oak, g, false, true); box(w - .1, .14, d - .1, 0, h + .13, 0, C.ivory, g, true);
+        box(w - .12, .06, d * .62, 0, h + .23, d * .15, C.linen, g, true); box(w * .65, .1, d * .17, 0, h + .25, -d * .33, '#faf5ea', g, true);
+      }
+      for (const side of [-1, 1]) { box(.045, .06, d - .08, side * (w / 2 - .035), 1.94, 0, C.oak, g, false, true); box(.035, .035, d - .08, side * (w / 2 - .035), 1.75, 0, C.oak, g, false, true); }
+      box(w - .08, .06, .045, 0, 1.94, -d / 2 + .035, C.oak, g, false, true);
+      box(w * .44, .06, .045, -w * .23, 1.94, d / 2 - .035, C.oak, g, false, true);
+      for (const x of [w * .07, w * .43]) box(.035, 1.5, .04, x, .75, d / 2 - .02, C.oak, g, false, true);
+      for (let i = 0; i < 6; i++) box(w * .36, .035, .06, w * .25, .2 + i * .23, d / 2 - .02, C.oak, g, false, true);
+    } else if (f.kind === 'table' || f.kind === 'desk' || f.kind === 'doubleDesk') {
       const h = f.kind === 'table' && d < .75 ? .39 : .74; legs(w, d, h - .04, g); box(w, .075, d, 0, h, 0, C.oak, g, true, true);
-      if (f.kind === 'desk') { box(w * .43, .36, .035, 0, h + .27, -d * .23, C.dark, g, true); box(w * .39, .3, .012, 0, h + .27, -d * .23 + .023, '#777d6e', g); box(.045, .11, .08, 0, h + .08, -d * .23, C.dark, g); box(w * .31, .025, d * .2, 0, h + .06, d * .14, '#c7c5b9', g, true); plant(w * .37, h + .04, -d * .14, .19, g); }
+      if (f.kind === 'desk' || f.kind === 'doubleDesk') {
+        const stations = f.kind === 'doubleDesk' ? [-w * .25, w * .25] : [0], workstationWidth = f.kind === 'doubleDesk' ? w * .46 : w;
+        for (const x of stations) { box(workstationWidth * .43, .36, .035, x, h + .27, -d * .23, C.dark, g, true); box(workstationWidth * .39, .3, .012, x, h + .27, -d * .23 + .023, '#777d6e', g); box(.045, .11, .08, x, h + .08, -d * .23, C.dark, g); box(workstationWidth * .31, .025, d * .2, x, h + .06, d * .14, '#c7c5b9', g, true); }
+        plant(w * .42, h + .04, -d * .14, .16, g);
+      }
       else { plant(w * .12, h + .04, 0, .22, g); cylinder(.12, .12, .018, -w * .27, h + .05, .07, C.ivory, g); cylinder(.045, .035, .07, -w * .27, h + .095, .07, '#a99271', g); }
     } else if (f.kind === 'plant') plant(0, 0, 0, w * 1.35, g);
     else if (f.kind === 'wardrobe') {
@@ -106,7 +141,7 @@ export function populateNordicScene(scene: THREE.Scene, plan: Plan, cutaway: boo
       if (w > 1.8) for (let i = 0; i < 2; i++) cylinder(d * .13, d * .13, .008, w * .24 + i * d * .3, h + .05, 0, C.dark, g); glow(w - .05, 0, .045, d / 2 + .02, g);
     }
   });
-  if (labels) plan.rooms.forEach(room => {
+  if (labels) [...plan.rooms, ...(plan.excludedAreas || []).map(a => ({ name: a.name, x: a.x + a.w / 2, y: a.y + a.d / 2 })), ...(plan.reconstruction?.method === 'reference' ? [{ name: '左上外凸陽台待核', x: -1, y: 1.2 }] : [])].forEach(room => {
     const canvas = document.createElement('canvas'); canvas.width = 64 + room.name.length * 52; canvas.height = 112; const c = canvas.getContext('2d')!;
     c.fillStyle = new THREE.Color(style.accent).multiplyScalar(.6).getStyle(); c.fillRect(3, 5, canvas.width - 6, 102); c.font = '500 48px "Noto Sans TC", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#fff8e9'; c.fillText(room.name, canvas.width / 2, 56, canvas.width - 30);
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; textures.push(texture); const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }); materials.push(material); const sprite = new THREE.Sprite(material); sprite.position.set(room.x - plan.width / 2, 1.1, room.y - plan.depth / 2); sprite.scale.set(canvas.width / 112 * .37, .37, 1); sprite.renderOrder = 10; scene.add(sprite);

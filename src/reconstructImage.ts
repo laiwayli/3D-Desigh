@@ -7,6 +7,27 @@ import type { StyleId } from './interiorStyles';
 export type Crop = { x: number; y: number; w: number; h: number };
 export type LineRun = { axis: 'h' | 'v'; position: number; start: number; end: number; thickness: number; samples: number };
 export type ReconstructionSettings = { width: number; depth: number; crop: Crop; style?: StyleId };
+export type LineQuality = { horizontal: number; vertical: number; total: number; warnings: string[]; blockingReason?: string };
+
+/** This flags line clutter, not architectural correctness or OCR confidence. */
+export function assessWallLines(lines: LineRun[], width: number, height: number): LineQuality {
+  const horizontal = lines.filter(l => l.axis === 'h'), vertical = lines.filter(l => l.axis === 'v');
+  const quality: LineQuality = { horizontal: horizontal.length, vertical: vertical.length, total: lines.length, warnings: [] };
+  if (horizontal.length < 2 || vertical.length < 2) {
+    quality.blockingReason = '尚未找到足夠的牆線。請框選建築外框、排除尺寸線與標題，或換成較清晰的正面掃描圖。';
+    return quality;
+  }
+  let crossings = 0;
+  for (const h of horizontal) for (const v of vertical) if (v.position >= h.start && v.position <= h.end && h.position >= v.start && h.position <= v.end) crossings++;
+  const crossingRatio = crossings / (horizontal.length * vertical.length);
+  const shortFraction = lines.filter(l => l.end - l.start < Math.max(width, height) * .18).length / lines.length;
+  if (lines.length > 80 || (lines.length > 30 && crossingRatio > .42) || (lines.length > 45 && shortFraction > .7)) {
+    quality.blockingReason = `候選線過於密集（${lines.length} 段），可能包含尺寸線、電路符號或剖面線。請縮小框選到建築本體，或改用「僅匯入描圖底圖」，避免把雜訊當成牆。`;
+  } else if (lines.length > 30 || shortFraction > .55) {
+    quality.warnings.push('短線或候選線較多，可能混入文字、尺寸線與設備符號，請逐區比對疊圖。');
+  }
+  return quality;
+}
 
 /** Adaptive local threshold tolerates shaded paper; this detects linework, not room semantics. */
 export function extractWallLines(rgba: Uint8ClampedArray, width: number, height: number): LineRun[] {
@@ -40,7 +61,7 @@ export function extractWallLines(rgba: Uint8ClampedArray, width: number, height:
     if (!group) merged.push({ ...line });
     else { group.thickness = Math.max(group.thickness, Math.abs(group.position - line.position) * 2); group.position = (group.position * group.samples + line.position) / (group.samples + 1); group.samples++; group.start = Math.min(group.start, line.start); group.end = Math.max(group.end, line.end); }
   }
-  return merged.filter(g => g.samples >= 2 && g.end - g.start > Math.max(width, height) * .055).sort((a, b) => (b.end - b.start) * b.samples - (a.end - a.start) * a.samples).slice(0, 100);
+  return merged.filter(g => g.samples >= 2 && g.end - g.start > Math.max(width, height) * .055).sort((a, b) => (b.end - b.start) * b.samples - (a.end - a.start) * a.samples);
 }
 
 export async function reconstructImage(image: RasterPlan, settings: ReconstructionSettings): Promise<Plan> {
@@ -53,7 +74,8 @@ export async function reconstructImage(image: RasterPlan, settings: Reconstructi
   const ctx = canvas.getContext('2d')!; ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   await new Promise<void>(r => requestAnimationFrame(() => r()));
   const lines = extractWallLines(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
-  if (lines.filter(l => l.axis === 'h').length < 2 || lines.filter(l => l.axis === 'v').length < 2) throw new Error('尚未找到足夠的牆線。請框選建築外框、排除尺寸線與標題，或換成較清晰的正面掃描圖。');
+  const quality = assessWallLines(lines, canvas.width, canvas.height);
+  if (quality.blockingReason) throw new Error(quality.blockingReason);
   const xs = lines.flatMap(l => l.axis === 'h' ? [l.start, l.end] : [l.position]), ys = lines.flatMap(l => l.axis === 'v' ? [l.start, l.end] : [l.position]);
   const left = Math.max(0, Math.min(...xs)), top = Math.max(0, Math.min(...ys)), right = Math.min(canvas.width, Math.max(...xs)), bottom = Math.min(canvas.height, Math.max(...ys));
   const width = settings.width, depth = settings.depth, pxw = right - left, pxh = bottom - top;
@@ -69,7 +91,7 @@ export async function reconstructImage(image: RasterPlan, settings: Reconstructi
     }
   }
   const drawing = document.createElement('canvas'); drawing.width = Math.round(pxw); drawing.height = Math.round(pxh); drawing.getContext('2d')!.drawImage(canvas, left, top, pxw, pxh, 0, 0, drawing.width, drawing.height);
-  let plan: Plan = { id: uid(), name: `${image.name.slice(0, 25)}・重建草稿`, width, depth, wallThickness: .18, height: 2.8, exteriorLocked: true, entry: 'right', entryPosition: .12, style: settings.style || 'nordic', walls, rooms: [], furniture: [], underlay: { id: uid(), name: image.name, src: drawing.toDataURL('image/jpeg', .88), pixelWidth: drawing.width, pixelHeight: drawing.height, x: 0, y: 0, width, height: depth, opacity: .25, visible: true }, reconstruction: { method: 'image-lines', needsReview: true, dimensions: [{ label: '使用者確認的主體寬', metres: width, status: 'read' }, { label: '使用者確認的主體深', metres: depth, status: 'read' }], notes: ['依線條對比辨識水平與垂直牆線，結果為待校對草稿。', '比例依使用者確認的尺寸設定，未以 OCR 自動確定標註。', '外牆採辨識範圍的矩形近似；斜牆、曲牆、柱、門窗與外推需核對。', '房間用途以面積推測，請在空間清單修改用途後重新配置家具。'] } };
+  let plan: Plan = { id: uid(), name: `${image.name.slice(0, 25)}・重建草稿`, width, depth, wallThickness: .18, height: 2.8, exteriorLocked: true, entry: 'right', entryPosition: .12, style: settings.style || 'nordic', walls, rooms: [], furniture: [], underlay: { id: uid(), name: image.name, src: drawing.toDataURL('image/jpeg', .88), pixelWidth: drawing.width, pixelHeight: drawing.height, x: 0, y: 0, width, height: depth, calibratedDistance: width, opacity: .25, visible: true }, reconstruction: { method: 'image-lines', needsReview: true, dimensions: [{ label: '使用者確認的主體寬', metres: width, status: 'read' }, { label: '使用者確認的主體深', metres: depth, status: 'read' }], notes: [`線條摘要：水平 ${quality.horizontal}／垂直 ${quality.vertical}，共 ${quality.total} 段候選；不代表已確認的牆數。`, ...quality.warnings, '依線條對比辨識水平與垂直牆線，結果為待校對草稿。', '比例依使用者確認的尺寸設定，未以 OCR 自動確定標註。', '不讀取房名文字，不理解電路符號，也不會校正斜拍照片的透視變形。', '外牆採辨識範圍的矩形近似；斜牆、曲牆、柱、門窗與外推需核對。', '房間用途以面積推測，請在空間清單修改用途後重新配置家具。'] } };
   plan.rooms = findRooms(plan);
   if (!plan.rooms.length) plan.reconstruction!.notes.push('尚未找到封閉房間。請在 2D 修正牆面後，使用「重算房間並配置家具」。');
   const result = autoFurnish(plan); plan = result.plan;

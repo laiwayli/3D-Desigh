@@ -72,6 +72,8 @@ try {
   const drawingBase64 = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 600; c.height = 400; const ctx = c.getContext('2d'); ctx.fillStyle = '#ddd'; ctx.fillRect(0, 0, 600, 400); ctx.strokeStyle = '#111'; ctx.lineWidth = 8; ctx.strokeRect(40, 40, 520, 320); ctx.beginPath(); ctx.moveTo(300, 40); ctx.lineTo(300, 360); ctx.moveTo(40, 200); ctx.lineTo(560, 200); ctx.stroke(); return c.toDataURL('image/png').split(',')[1]; });
   await page.getByLabel('選擇平面圖檔案').setInputFiles({ name: 'offline-rebuild.png', mimeType: 'image/png', buffer: Buffer.from(drawingBase64, 'base64') });
   await page.getByTestId('crop-preview').waitFor();
+  await page.getByLabel('重建主體總寬', { exact: true }).fill('900');
+  await page.getByLabel('重建主體總深', { exact: true }).fill('600');
   await page.getByRole('checkbox', { name: /我已依原圖核對/ }).check();
   await page.getByRole('button', { name: '辨識牆面並配置家具' }).click();
   await page.getByTestId('reconstruction-preview').waitFor();

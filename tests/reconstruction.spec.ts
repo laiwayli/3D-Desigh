@@ -45,12 +45,20 @@ test('reconstructs walls from an imported image instead of applying a generic te
   const p = await state(page); expect(p.width).toBe(9); expect(p.depth).toBe(6); expect(p.reconstruction.method).toBe('image-lines'); expect(p.reconstruction.needsReview).toBe(true);
   expect(p.walls.some((w: { a: { x: number }; b: { x: number } }) => Math.abs(w.a.x - 4.5) < .15 && Math.abs(w.b.x - 4.5) < .15)).toBe(true);
   expect(p.rooms.length).toBeGreaterThanOrEqual(3); expect(p.furniture.length).toBeGreaterThan(3);
+  expect(p.underlay.calibratedDistance).toBe(9);
+  await page.getByRole('button', { name: '2D 平面設計' }).click();
+  await page.getByRole('button', { name: '解鎖調整', exact: true }).click();
+  await page.getByLabel('空間寬度', { exact: true }).fill('10');
+  await page.getByRole('button', { name: '套用長寬', exact: true }).click();
+  const resized = await state(page);
+  expect(resized.width).toBe(10); expect(resized.underlay.width).toBe(9); expect(resized.underlay.height).toBe(6);
+  expect(resized.underlay.calibratedDistance).toBe(9);
 });
 
 test('does not fabricate a layout when the imported image has no usable wall lines', async ({ page }) => {
   await page.goto('/'); const original = await state(page);
   const blank = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 600; c.height = 400; const ctx = c.getContext('2d')!; ctx.fillStyle = '#ddd'; ctx.fillRect(0, 0, 600, 400); return c.toDataURL('image/png').split(',')[1]; });
   await page.getByRole('button', { name: '匯入原圖並重建' }).click(); await page.getByLabel('選擇平面圖檔案').setInputFiles({ name: 'blank.png', mimeType: 'image/png', buffer: Buffer.from(blank, 'base64') });
-  await expect(page.getByTestId('crop-preview')).toBeVisible(); await page.getByRole('checkbox', { name: /我已依原圖核對/ }).check(); await page.getByRole('button', { name: '辨識牆面並配置家具' }).click();
+  await expect(page.getByTestId('crop-preview')).toBeVisible(); await page.getByLabel('重建主體總寬', { exact: true }).fill('900'); await page.getByLabel('重建主體總深', { exact: true }).fill('600'); await page.getByRole('checkbox', { name: /我已依原圖核對/ }).check(); await page.getByRole('button', { name: '辨識牆面並配置家具' }).click();
   await expect(page.getByRole('alert')).toContainText('尚未找到足夠的牆線'); expect((await state(page)).id).toBe(original.id);
 });
