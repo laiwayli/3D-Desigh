@@ -74,7 +74,7 @@ describe('same-home reference transcription', () => {
     const study = p.rooms.find(r => r.furnishing === 'couple-work')!;
     expect(p.furniture.filter(f => f.kind === 'bunkBed' && inRoom(f, child))).toHaveLength(1);
     expect(p.furniture.filter(f => f.kind === 'doubleDesk' && inRoom(f, study))).toHaveLength(1);
-    expect(p.furniture.filter(f => f.kind === 'chair' && inRoom(f, study))).toHaveLength(2);
+    expect(p.furniture.filter(f => f.kind === 'officeChair' && inRoom(f, study))).toHaveLength(2);
     for (const [i, f] of p.furniture.entries()) {
       expect(furnitureCollides(f, p, p.furniture.slice(0, i)), `${f.kind} at ${f.x}, ${f.y}`).toBe(false);
     }

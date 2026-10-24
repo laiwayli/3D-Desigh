@@ -22,14 +22,33 @@ try {
   await page.getByTestId('plan-canvas').waitFor();
   assert.equal(await page.locator('.furniture-hit').count(), 21);
   await page.getByRole('button', { name: '家具', exact: true }).click();
+  const library = page.getByRole('region', { name: '家具圖塊庫', exact: true });
+  assert.equal(await library.locator('.furniture-library-card').count(), 43);
+  assert.equal(await library.locator('select option').count(), 98);
   await page.getByRole('button', { name: '三人沙發' }).click();
   assert.equal(await page.locator('.furniture-hit').count(), 22);
+  await library.getByLabel('搜尋家具').fill('書櫃');
+  assert.equal(await library.locator('.furniture-library-card').count(), 1);
+  await library.getByLabel('書櫃尺寸款式').selectOption('bookshelf-compact');
+  await library.getByRole('button', { name: '書櫃', exact: true }).click();
+  await page.getByLabel('家具高度', { exact: true }).fill('1.65');
+  await page.getByLabel('家具表面材質', { exact: true }).selectOption('wood');
+  await page.getByLabel('家具主色', { exact: true }).fill('#486d87');
+  await page.waitForFunction(() => {
+    const item = JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.furniture.at(-1);
+    return item.assetId === 'bookshelf-compact' && item.h === 1.65 && item.finish === 'wood' && item.color === '#486d87';
+  });
+  await page.reload();
+  await page.getByTestId('plan-canvas').waitFor();
+  const customized = await page.evaluate(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.furniture.at(-1));
+  assert.equal(customized.assetId, 'bookshelf-compact');
+  assert.deepEqual([customized.w, customized.d, customized.h, customized.finish, customized.color], [.6, .3, 1.65, 'wood', '#486d87']);
   await page.getByRole('button', { name: '生成配置方案' }).click();
   await page.getByRole('dialog').getByRole('button', { name: '上側', exact: true }).click();
   await page.getByRole('button', { name: '套用此配置' }).click();
   await page.getByRole('button', { name: /3D 空間預覽/ }).click();
   const canvas = page.getByTestId('scene-3d').locator('canvas');
-  await canvas.waitFor();
+  await canvas.waitFor({ timeout: 45000 });
   assert(await canvas.evaluate(el => !!el.getContext('webgl2')));
   await page.getByRole('button', { name: '匯出圖面' }).click();
   const downloaded = page.waitForEvent('download');
@@ -59,6 +78,12 @@ try {
   await page.getByTestId('scene-3d').locator('canvas').waitFor();
   await page.getByRole('button', { name: '選擇室內風格' }).click();
   assert.equal(await page.locator('.style-choice').count(), 10);
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="style-room-preview"][data-preview-status="ready"]').length === 10, undefined, { timeout: 180000 });
+  await page.locator('.style-render-preview img').evaluateAll(images => Promise.all(images.map(img => img.decode())));
+  const styleSamples = await page.locator('.style-render-preview img').evaluateAll(images => images.map(img => ({ src: img.src, loaded: img.complete && img.naturalWidth > 0 })));
+  assert.equal(styleSamples.length, 10);
+  assert(styleSamples.every(sample => sample.loaded && sample.src.startsWith('data:image/png;base64,')), 'All ten offline style previews must be decoded embedded PNGs');
+  assert.equal(new Set(styleSamples.map(sample => sample.src)).size, 10, 'Styles must have distinct rendered samples');
   await page.getByRole('dialog').getByRole('button', { name: /INDUSTRIAL/ }).click();
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('planform-workspace-v1')).plan.style === 'industrial');
   const exporting = page.waitForEvent('download');
@@ -83,7 +108,7 @@ try {
   assert(automatic.rooms.length >= 3); assert(automatic.furniture.length > 3);
   assert.equal(network.length, 0, 'Offline HTML must make no network requests');
   assert.deepEqual(errors, []);
-  console.log('PASS: standalone HTML works in an isolated page without external requests; furniture editing, entry generation, WebGL 3D, JSON export, offline PDF page selection, dimension calibration, reference reconstruction, 10 style choices, PNG export and automatic image-line reconstruction work.');
+  console.log('PASS: standalone HTML works in an isolated page without external requests; 43 furniture kinds / 98 variants, catalog search, exact variant dimensions, persistent height/material/colour edits, entry generation, WebGL 3D, JSON export, offline PDF page selection, dimension calibration, reference reconstruction, 10 distinct rendered style previews, PNG export and automatic image-line reconstruction work.');
 } finally { await browser.close(); }
 
 // Keep a friendly filename for downloading.

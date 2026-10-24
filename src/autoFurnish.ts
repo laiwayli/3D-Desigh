@@ -23,7 +23,7 @@ export function furnitureCollides(f: Furniture, plan: Plan, placed: Furniture[])
     const margin = w.thickness / 2 + .025;
     return lineIntersectsRect(w.a, w.b, { x: r.x - margin, y: r.y - margin, w: r.w + margin * 2, d: r.d + margin * 2 });
   })) return true;
-  return placed.some(other => { const bb = furnitureBounds(other); return Math.abs(other.x - f.x) < (b.w + bb.w) / 2 + .055 && Math.abs(other.y - f.y) < (b.d + bb.d) / 2 + .055; });
+  return placed.some(other => { if (['rug', 'pendant'].includes(f.kind) || ['rug', 'pendant'].includes(other.kind)) return false; const bb = furnitureBounds(other); return Math.abs(other.x - f.x) < (b.w + bb.w) / 2 + .055 && Math.abs(other.y - f.y) < (b.d + bb.d) / 2 + .055; });
 }
 
 export function autoFurnish(plan: Plan): { plan: Plan; skipped: string[] } {
@@ -42,7 +42,7 @@ export function autoFurnish(plan: Plan): { plan: Plan; skipped: string[] } {
     };
     if (room.kind === 'living') {
       place('sofa', [[rw * .42, .7], [rw * .42, rd - .7, 180], [.7, rd / 2, 90]], Math.min(2.7, rw - .5), .92, true);
-      place('table', [[rw * .42, 1.9], [rw * .42, rd - 1.9], [1.9, rd / 2]], 1.1, .55);
+      place('coffeeTable', [[rw * .42, 1.9], [rw * .42, rd - 1.9], [1.9, rd / 2]], 1.1, .55);
       place('tv', [[rw * .42, rd - .37], [rw * .42, .37, 180], [rw - .37, rd / 2, 90]], Math.min(1.8, rw - .5), .38);
       place('plant', [[.48, .48], [rw - .48, .48], [rw - .48, rd - .48]], .45, .45);
     } else if ((room.kind === 'bedroom' || room.kind === 'master') && room.furnishing === 'bunk') {
@@ -52,11 +52,12 @@ export function autoFurnish(plan: Plan): { plan: Plan; skipped: string[] } {
       const bw = rw >= 3.1 ? 1.8 : 1.35, bd = 2;
       place('bed', [...(rd < 2.5 ? [[rw / 2, rd / 2] as [number, number]] : []), [rw / 2, 1.2] as [number, number], [rw / 2, rd - 1.2, 180] as [number, number, number], [1.2, rd / 2, 90] as [number, number, number], [rw - 1.2, rd / 2, -90] as [number, number, number]], bw, bd, true);
       place('wardrobe', [[rw / 2, rd - .42], [rw - .42, rd / 2, 90], [.42, rd / 2, 90]], Math.min(1.8, rw - .5), .58);
+      place('nightstand', [[.45, .55], [rw - .45, .55]], .45, .4);
       if (rw > 3.4) place('plant', [[.4, .45], [rw - .4, .45]], .4, .4);
     } else if (room.kind === 'study' && room.furnishing === 'couple-work') {
       const workChairs = (desk: Furniture): Furniture[] => {
         const a = desk.rotation * Math.PI / 180;
-        return [-.5, .5].map(u => ({ id: uid(), kind: 'chair', x: desk.x + Math.cos(a) * u - Math.sin(a) * .83, y: desk.y + Math.sin(a) * u + Math.cos(a) * .83, rotation: desk.rotation, w: .5, d: .52 }));
+        return [-.5, .5].map(u => ({ id: uid(), kind: 'officeChair', x: desk.x + Math.cos(a) * u - Math.sin(a) * .83, y: desk.y + Math.sin(a) * u + Math.cos(a) * .83, rotation: desk.rotation, w: .5, d: .52 }));
       };
       const desk = place('doubleDesk', [[rw / 2, .5], [rw - .5, rd / 2, 90], [.5, rd / 2, -90], [rw - .5, rd * .6, 90], [.5, rd * .6, -90], [rw / 2, rd - .5, 180]], 2, .65, true, candidate => {
         const chairs = workChairs(candidate);
@@ -68,18 +69,18 @@ export function autoFurnish(plan: Plan): { plan: Plan; skipped: string[] } {
       place('wardrobe', [[rw / 2, rd - .4], [rw / 2, .4]], Math.min(1.5, rw - .5), .55);
     } else if (room.kind === 'study') {
       place('desk', [[rw / 2, .5], [.5, rd / 2, 90], [rw / 2, rd - .5, 180]], Math.min(1.6, rw - .5), .65, true);
-      place('chair', [[rw / 2, 1.3], [1.3, rd / 2, 90], [rw / 2, rd - 1.3, 180]], .58, .6);
-      place('wardrobe', [[rw / 2, rd - .4], [rw - .4, rd / 2, 90]], Math.min(1.5, rw - .5), .55);
+      place('officeChair', [[rw / 2, 1.3], [1.3, rd / 2, 90], [rw / 2, rd - 1.3, 180]], .58, .6);
+      place('bookshelf', [[rw / 2, rd - .4], [rw - .4, rd / 2, 90]], Math.min(1.5, rw - .5), .4);
     } else if (room.kind === 'kitchen') {
       place('kitchen', [[.48, rd / 2, 90], [rw - .48, rd / 2, 90], [rw / 2, .48]], Math.min(2.5, rd - .6), .6, true);
     } else if (room.kind === 'bathroom') {
       place('toilet', [[.55, .66], [rw - .55, .66], [.55, rd - .66, 180]], .62, .78, true);
       place('shower', [[rw - .65, rd - .65], [.65, rd - .65]], 1, 1);
-      place('kitchen', [[rw - .4, .66, 90], [.4, rd / 2, 90]], .75, .42);
+      place('vanity', [[rw - .4, .66, 90], [.4, rd / 2, 90]], .75, .42);
     } else if (room.kind === 'dining') {
       place('table', [[rw / 2, rd / 2], [rw / 2, rd / 2, 90]], 1.35, .8, true);
-      for (const u of [rw / 2 - .42, rw / 2 + .42]) place('chair', [[u, rd / 2 - .83]], .46, .46);
-      for (const u of [rw / 2 - .42, rw / 2 + .42]) place('chair', [[u, rd / 2 + .83, 180]], .46, .46);
+      for (const u of [rw / 2 - .42, rw / 2 + .42]) place('diningChair', [[u, rd / 2 - .83]], .46, .46);
+      for (const u of [rw / 2 - .42, rw / 2 + .42]) place('diningChair', [[u, rd / 2 + .83, 180]], .46, .46);
     } else if (room.kind === 'balcony') place('plant', [[.4, .4], [rw - .4, rd - .4]], .45, .45);
   }
   return { plan: { ...plan, furniture }, skipped };
